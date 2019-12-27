@@ -1,0 +1,6 @@
+github.com/gvallee/event v1.0.0 h1:xCItkYNS/aYhauq2k71lSsVVl8sU5hkrHadopRLy6zA=
+github.com/gvallee/event v1.0.0/go.mod h1:inzlWfhaWQ6plckByzvpD+BDQU00X+uHk/eQqAKdqOY=
+github.com/gvallee/memory_pool v1.1.1 h1:pGnUwMoX0hu+YgKx7nHFrs7xNKTvMPzdWCwTX0w3pQc=
+github.com/gvallee/memory_pool v1.1.1/go.mod h1:o204Z+fR91ft1SiCLL+iHJFn26+Fv6FiEvdUhuny1+s=
+github.com/gvallee/syserror v1.0.0 h1:c2gcrnxJolhe+daVBVPbTuGnXhOonZ8IqUMMwAhQASM=
+github.com/gvallee/syserror v1.0.0/go.mod h1:UtEvDMlsf6YpA29eU+JlpINYz/bLqfBEJ8wmpoJIzs4=
