@@ -48,42 +48,25 @@ const (
 )
 
 // Cfg represents the configuration of a transport
-type Cfg struct {
+type TransportCfg struct {
 	ID             string
 	TransportMode  string
 	ConnectionMode string
 }
 
-//type ConnManager interface{}
-
-// TransportPriv is a data structure that is specific to a given transport implementation
-//type TransportPriv interface{}
-
-// SendFn is a function pointer representing a send function for a given transport`
-type SendFn func() (uint64, error)
-
-// RecvFn is a function pointer representing a receive function for a given transport
-type RecvFn func() (uint64, error)
-
-// CloseConnectionFn is a function
-type CloseConnectionFn func() error
-
 // Transport is the structure representing a given network transport
 type Transport struct {
-	cfg Cfg
+	cfg TransportCfg
 
-	// todo: move to engine
+	commEngine  *Engine
 	EventEngine *event.Engine
 
 	// todo: move to engine
 	EventTypes map[string]*event.EventType
 	Priv       interface{}
 	ConcreteID string
+	eps        map[string]*Endpoint
 
-	//ConnMgr          ConnManager
-	//Send             SendFn
-	//Recv             RecvFn
-	Close            CloseConnectionFn
 	InitialNumEvents uint64
 
 	// Pointers to the different transport we support, used to get transport specific data
@@ -117,9 +100,11 @@ func (t *Transport) initEvtSystem() error {
 }
 
 // Init creates a new transport based on a requested configuration
-func Init(cfg Cfg) *Transport {
+func (cfg *TransportCfg) Init() *Transport {
 	var t Transport
-	t.cfg = cfg
+	t.cfg = *cfg
+	t.eps = make(map[string]*Endpoint)
+	t.EventTypes = make(map[string]*event.EventType)
 	return &t
 }
 
@@ -138,16 +123,40 @@ func (t *Transport) Fini() error {
 	return nil
 }
 
+func addTCPTransport(t *Transport, tcp *transport.TCPTransport) error {
+	if t == nil || tcp == nil {
+		return fmt.Errorf("invalid parameter(s); cannot add tcp transport")
+	}
+	log.Println("Adding TCP transport...")
+	if t.TCP != nil {
+		return fmt.Errorf("TCP transport already defined")
+	}
+	t.Priv = tcp
+	t.ConcreteID = transport.TCPTransportID
+	t.TCP = tcp
+	return nil
+}
+
 // Add sets a given concrete transport (e.g., TCP) to a generic transport structure
 func (t *Transport) Add(tpt interface{}) error {
-	switch tpt.(type) {
-	case *transport.TCPTransport:
-		if t.TCP != nil {
-			return fmt.Errorf("TCP transport already defined")
+	switch actualTransport := tpt.(type) {
+	case transport.TCPTransport:
+		//tcp := tpt.(transport.TCPTransport)
+		err := addTCPTransport(t, &actualTransport)
+		if err != nil {
+			return fmt.Errorf("failed to add TCP transport: %s", err)
 		}
-		t.TCP = tpt.(*transport.TCPTransport)
-		t.Priv = tpt
-		t.ConcreteID = transport.TCPTransportID
+	case *transport.TCPTransport:
+		/*
+			tcp := tpt.(*transport.TCPTransport)
+			if tcp == nil {
+				log.Fatal("Mmmm....")
+			}
+		*/
+		err := addTCPTransport(t, actualTransport)
+		if err != nil {
+			return fmt.Errorf("failed to add TCP transport: %s", err)
+		}
 	default:
 		return fmt.Errorf("unknown transport type")
 	}
@@ -160,20 +169,23 @@ func (t *Transport) Send(epID string, msg []byte) error {
 	switch t.ConcreteID {
 
 	case transport.TCPTransportID:
-		tx := t.TCP.TxPool.Get()
-		if tx == nil {
-			return fmt.Errorf("unable to get a RX ")
-		}
 		hdr := transport.TCPHeader{
 			MsgType: "INTERNAL:DATAMSG",
-			EPid:    epID,
+			Src:     epID,
 		}
-		t.TCP.SendMsg(tx, hdr, msg)
+		err := t.TCP.SendMsg(hdr, msg)
+		if err != nil {
+			return fmt.Errorf("unable to send TCP message")
+		}
 
 	default:
-		fmt.Errorf("unknown transport type: %s", t.ConcreteID)
+		return fmt.Errorf("unknown transport type: %s", t.ConcreteID)
 	}
 	return nil
+}
+
+func (t *Transport) LookupReceiver(target string) *Endpoint {
+	return t.eps[target]
 }
 
 // Recv receives a message from a transport
@@ -183,7 +195,21 @@ func (t *Transport) Recv() []byte {
 	case transport.TCPTransportID:
 		rx := <-t.TCP.RecvQueue
 		// Create a new event and emit it for the endpoint as a recv event
+		dst := t.TCP.ExtractDest(rx)
+		ep := t.LookupReceiver(dst)
+		if ep == nil {
+			log.Println("unknown target endpoint")
+			return nil
+		}
+		evt := ep.eventEngine.GetEvent(true)
+		if evt == nil {
+			log.Printf("unable to get an event")
+			return nil
+		}
 
+		// Emit event
+		payload := t.TCP.GetPayloadFromRX(rx)
+		evt.Emit(payload)
 	default:
 		log.Printf("[ERROR:transport] unknown transport type: %s", t.ConcreteID)
 		return nil
@@ -192,16 +218,29 @@ func (t *Transport) Recv() []byte {
 }
 
 func (tpt *Transport) Connect() *Endpoint {
-	var ep Endpoint
+	if tpt == nil || tpt.commEngine == nil {
+		log.Println("[ERROR:transport] corrupted transport")
+		return nil
+	}
+	ep := tpt.commEngine.CreateEndpoint()
 	switch tpt.ConcreteID {
 	case transport.TCPTransportID:
+		if tpt.TCP == nil {
+			log.Println("[ERROR:transport] corrupt transport; cannot connect")
+		}
+
 		// Add the transport to the endpoint
 		ep.transports = append(ep.transports, *tpt)
-		tpt.TCP.Conn = tpt.TCP.Connect(ep.ID)
+		serverID, err := tpt.TCP.Connect(ep.ID)
+		tpt.eps[serverID] = ep
+		if err != nil {
+			log.Printf("[ERROR:transport] unable to connect to remote peer: %s", err)
+			return nil
+		}
 	default:
 		log.Printf("[ERROR:transport] unknown transport type: %s", tpt.ConcreteID)
 		return nil
 	}
 
-	return &ep
+	return ep
 }

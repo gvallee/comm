@@ -8,13 +8,14 @@
 package comm
 
 import (
+	"log"
 	"testing"
 
 	"github.com/gvallee/comm/pkg/transport"
 )
 
 const (
-	tcpServerURL = "tcp://172.0.0.1"
+	tcpServerURL = "127.0.0.1"
 	msgStr       = "Hello World"
 )
 
@@ -37,7 +38,7 @@ func recvRoutine(t *testing.T) {
 	tcpTransport := serverCfg.Init()
 
 	tpt := commEngine.AddTransport(tcpTransport)
-	if tpt != nil {
+	if tpt == nil {
 		t.Fatalf("unable to add transport")
 	}
 
@@ -48,6 +49,7 @@ func recvRoutine(t *testing.T) {
 		t.Fatal("unable to create endpoint")
 	}
 
+	log.Println("Server: receiving message...")
 	msg := ep.Recv()
 	if string(msg) != msgStr {
 		t.Fatalf("Received %s instead of %s", string(msg), msgStr)
@@ -88,24 +90,24 @@ func TestBasicSendRecv(t *testing.T) {
 	}
 
 	tpt := commEngine.AddTransport(tcpTransport)
-	if tpt != nil {
+	if tpt == nil {
 		t.Fatal("unable to add transport")
 	}
 
 	// Use that endpoint to connect to server
 	targetEP := tpt.Connect()
-	if targetEP != nil {
+	if targetEP == nil {
 		t.Fatalf("unable to connect to endpoint")
 	}
 
 	// Send a few messages
 	msg := []byte(msgStr)
-	n, err := targetEP.Send(msg)
+
+	// todo: do not rely on transport.Send but wait for a send completion event so we can check
+	// how much data was sent
+	err := targetEP.Send(msg)
 	if err != nil {
 		t.Fatal("failed to send message")
-	}
-	if n != uint64(len(msg)) {
-		t.Fatalf("send %d bytes instead of %d", int(n), len(msg))
 	}
 
 	// This will emit a termination event and make sure everything is going to

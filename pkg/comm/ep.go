@@ -10,9 +10,8 @@ package comm
 import (
 	"fmt"
 	"log"
-	"math/rand"
-	"time"
 
+	"github.com/gvallee/comm/internal/pkg/util"
 	"github.com/gvallee/comm/pkg/transport"
 	"github.com/gvallee/event/pkg/event"
 )
@@ -39,27 +38,10 @@ type Endpoint struct {
 	RXEvents chan event.Event
 }
 
-func generateEndpointID() string {
-	// generate a 256 random character string
-	rand.Seed(time.Now().UnixNano())
-	digits := "0123456789"
-	all := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" + digits
-	length := 256
-	buf := make([]byte, length)
-	buf[0] = digits[rand.Intn(len(digits))]
-	for i := 2; i < length; i++ {
-		buf[i] = all[rand.Intn(len(all))]
-	}
-	rand.Shuffle(len(buf), func(i, j int) {
-		buf[i], buf[j] = buf[j], buf[i]
-	})
-
-	return string(buf)
-}
-
 // Send sends a message to a given endpoint
-func (ep *Endpoint) Send([]byte) (uint64, error) {
-	return 0, nil
+func (ep *Endpoint) Send(data []byte) error {
+	// todo: do not only use the first transport=
+	return ep.transports[0].Send(ep.ID, data)
 }
 
 // Recv receives a message from a given endpoint
@@ -155,13 +137,13 @@ func (e *Engine) CreateEndpoint() *Endpoint {
 
 	var ep Endpoint
 	ep.engine = e
-	ep.ID = generateEndpointID()
+	ep.ID = util.GenerateID()
 	// We need an ID that is locally unique
 	for {
 		if e.eps[ep.ID] == nil {
 			break
 		}
-		ep.ID = generateEndpointID()
+		ep.ID = util.GenerateID()
 	}
 	e.eps[ep.ID] = &ep
 
@@ -183,9 +165,6 @@ func (e *Engine) CreateEndpoint() *Endpoint {
 			// Associate the TCP transport accepting connection to the new endpoint
 			ep.transports = append(ep.transports, *t)
 			log.Println("[INFO:endpoint] creating accept thread for TCP transport")
-			// todo: create the thread only if it does not already exist; for now we
-			// assume it does not
-			go t.TCP.Accept(ep.ID)
 		}
 	}
 

@@ -51,18 +51,26 @@ func (cfg *EngineCfg) Init() *Engine {
 // AddTransport adds a transport to a given communication engine.
 func (e *Engine) AddTransport(tpt interface{}) *Transport {
 	if e == nil || tpt == nil {
+		log.Printf("[ERROR:engine] invalid parameter(s); unable to add transport")
 		return nil
 	}
 
-	var newTransport Transport
+	newTransportCfg := TransportCfg{
+		ID:             "",
+		TransportMode:  "",
+		ConnectionMode: "",
+	}
+	newTransport := newTransportCfg.Init()
+
 	err := newTransport.Add(tpt)
 	if err != nil {
-		log.Println("[ERROR:engine] unable to add transport")
+		log.Printf("[ERROR:engine] unable to add transport: %s", err)
 		return nil
 	}
-	e.transports = append(e.transports, &newTransport)
+	e.transports = append(e.transports, newTransport)
+	newTransport.commEngine = e
 
-	return &newTransport
+	return newTransport
 }
 
 func (e *Engine) getNextTransport() int {
