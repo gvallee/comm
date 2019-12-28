@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gvallee/comm/internal/pkg/util"
 	"github.com/gvallee/memory_pool/pkg/pool"
 )
 
@@ -284,7 +285,7 @@ func handleTermMsg() bool {
 	return true
 }
 
-func extractPayload(rx []byte) ([]byte, error) {
+func (t *TCPTransport) ExtractPayload(rx []byte) ([]byte, error) {
 	sizeOfSize := int(rx[sizeOfSizeOffset])
 	payloadSize, n := binary.Uvarint(rx[payloadSizeOffset : payloadSizeOffset+sizeOfSize])
 	if n != sizeOfSize {
@@ -293,10 +294,21 @@ func extractPayload(rx []byte) ([]byte, error) {
 	return rx[payloadOffset : payloadOffset+payloadSize], nil
 }
 
+func (t *TCPTransport) ExtractDest(rx []byte) string {
+	return string(rx[dstOffset : dstOffset+dstLen])
+}
+
+// GetSrcFromRX returns the subset of the RX storing the ID of the message's source.
+// Note that the value is concidered invalid once the RX is returned; it is the
+// responsability of the caller to make a copy as required.
+func (tpt *TCPTransport) ExtractSrc(rx []byte) []byte {
+	return rx[srcOffset : srcOffset+srcLen]
+}
+
 func handleConnRedirect(tcp *TCPTransport, rx []byte) error {
 	// During a connection attempt, we are being redirected to another port
 	src := string(rx[srcOffset : srcOffset+srcLen])
-	payload, err := extractPayload(rx)
+	payload, err := tcp.ExtractPayload(rx)
 	if err != nil {
 		return fmt.Errorf("unable to extract payload from RX: %w", err)
 	}
@@ -304,7 +316,7 @@ func handleConnRedirect(tcp *TCPTransport, rx []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to extract port from payload: %w", err)
 	}
-	err = tcp.ConnectToPort(src, uint16(port))
+	_, err = tcp.ConnectToPort(src, uint16(port))
 	if err != nil {
 		return fmt.Errorf("connect failed: %w", err)
 	}
@@ -450,6 +462,16 @@ func (cfg *TCPTransportCfg) Init() *TCPTransport {
 	tcp.sendQueue = make(chan []byte)
 	tcp.RecvQueue = make(chan []byte)
 
+	if cfg.Accept {
+		serverID := util.GenerateID()
+		tcp.receiverEPs = append(tcp.receiverEPs, serverID)
+		err := tcp.Accept(serverID)
+		if err != nil {
+			log.Printf("[ERROR:tcp] unable to accept incoming connections: %s", err)
+			return nil
+		}
+	}
+
 	return &tcp
 }
 
@@ -465,6 +487,11 @@ func (tpt *TCPTransport) Close() error {
 
 // IsAcceptingConns checks the status of the transport and if incoming connections can be accepted
 func (tpt *TCPTransport) IsAcceptingConns() bool {
+	if tpt == nil {
+		log.Println("[ERROR:tcp] undefined transport")
+		return false
+	}
+
 	if tpt.Status == tcpTransportStatusAccepting {
 		return true
 	}
@@ -526,11 +553,11 @@ func (tpt *TCPTransport) Accept(epID string) error {
 	return nil
 }
 
-func (tpt *TCPTransport) initHandshake(epID string) error {
+func (tpt *TCPTransport) initHandshake(epID string) (string, error) {
 	// Get an TX
 	tx := tpt.TxPool.Get()
 	if tx == nil {
-		return fmt.Errorf("unable to get TX")
+		return "", fmt.Errorf("unable to get TX")
 	}
 
 	// Set the TX
@@ -549,33 +576,38 @@ func (tpt *TCPTransport) initHandshake(epID string) error {
 	// Wait for CONNACK
 	rx := tpt.RxPool.Get()
 	if rx == nil {
-		return fmt.Errorf("[ERROR:tcp] unable to get RX buffer")
+		return "", fmt.Errorf("[ERROR:tcp] unable to get RX buffer")
 	}
 	_, err := recvMsg(tpt.Conn, rx)
 	if err != nil {
-		return fmt.Errorf("unable to receive data: %s", err)
+		return "", fmt.Errorf("unable to receive data: %s", err)
 	}
 	msgType := string(rx[msgTypeOffset : msgTypeOffset+msgTypeLen])
 	if msgType != CONNACK {
-		return fmt.Errorf("receive a %s message instead of CONNREQ", msgType)
+		return "", fmt.Errorf("receive a %s message instead of CONNREQ", msgType)
 	}
+
+	var serverID []byte
+	id := tpt.ExtractSrc(rx)
+	copy(serverID, id)
+	tpt.RxPool.Return(rx)
 
 	log.Println("Handshake completed")
 
-	return nil
+	return string(serverID), nil
 }
 
-func (tpt *TCPTransport) Connect(epID string) error {
+func (tpt *TCPTransport) Connect(epID string) (string, error) {
 	if tpt == nil || tpt.Cfg == nil {
 		log.Println("[ERROR:tcp] corrupted transport object")
-		return nil
+		return "", nil
 	}
 	log.Printf("Connecting to %s:%d\n", tpt.Cfg.Interface, tpt.Cfg.PortLow)
 	return tpt.ConnectToPort(epID, tpt.Cfg.PortLow)
 }
 
 // Connect creates a connection using a given transport
-func (tpt *TCPTransport) ConnectToPort(epID string, port uint16) error {
+func (tpt *TCPTransport) ConnectToPort(epID string, port uint16) (string, error) {
 	var err error
 	retry := 0
 	ip := tpt.Cfg.Interface
@@ -587,16 +619,16 @@ Retry:
 			time.Sleep(time.Duration(retry) * time.Second)
 			goto Retry
 		}
-		return nil
+		return "", nil
 	}
 
 	// Start the send thread
 	go sendThread(tpt)
 
 	log.Println("Connection succeeded, initiating handshake...")
-	err = tpt.initHandshake(epID)
+	serverID, err := tpt.initHandshake(epID)
 	if err != nil {
-		return fmt.Errorf("[ERROR] unable to initiate connection handshake: %w", err)
+		return "", fmt.Errorf("[ERROR] unable to initiate connection handshake: %w", err)
 	}
 
 	// Start receive thread
@@ -604,7 +636,7 @@ Retry:
 	go recvThread(tpt)
 
 	log.Println("Connect() completed")
-	return nil
+	return serverID, nil
 }
 
 // GetMsgTypeFromRX is a helper function that parses a given RX buffer and returns the

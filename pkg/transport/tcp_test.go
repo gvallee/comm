@@ -7,7 +7,6 @@ import (
 
 const (
 	clientID   = "I am the client"
-	serverID   = "I am the server"
 	msg1       = "message 1"
 	msg2       = "message 2"
 	allDoneMsg = "All done."
@@ -26,15 +25,10 @@ func doServer(t *testing.T) {
 		t.Fatalf("unable to instantiate TCP transport")
 	}
 
-	err := tcp.Accept(serverID)
-	if err != nil {
-		t.Fatalf("unable to accept incoming connections: %s", err)
-	}
-
 	log.Println("Server test: Connection accepted")
 
 	rx := <-tcp.RecvQueue
-	data, err := extractPayload(rx)
+	data, err := tcp.ExtractPayload(rx)
 	if err != nil {
 		t.Fatalf("unable to extract payload: %s", err)
 	}
@@ -48,7 +42,7 @@ func doServer(t *testing.T) {
 	}
 
 	rx = <-tcp.RecvQueue
-	data, err = extractPayload(rx)
+	data, err = tcp.ExtractPayload(rx)
 	if err != nil {
 		t.Fatalf("unable to extract payload: %s", err)
 	}
@@ -63,7 +57,6 @@ func doServer(t *testing.T) {
 
 	hdr := TCPHeader{
 		MsgType: DATAMSG,
-		Src:     serverID,
 		Dst:     clientID,
 	}
 	err = tcp.SendMsg(hdr, []byte(allDoneMsg))
@@ -85,17 +78,16 @@ func doClient(t *testing.T) {
 	}
 
 	log.Println("Connecting to server...")
-	err := tcp.Connect(clientID)
+	serverID, err := tcp.Connect(clientID)
 	if err != nil {
 		t.Fatalf("connect failed: %s", err)
 	}
 
+	log.Printf("Connection to %s successded.\n", serverID)
 	log.Println("Start sending test messages...")
 
 	hdr := TCPHeader{
 		MsgType: DATAMSG,
-		Src:     clientID,
-		Dst:     serverID,
 	}
 	err = tcp.SendMsg(hdr, []byte(msg1))
 	if err != nil {
@@ -110,7 +102,7 @@ func doClient(t *testing.T) {
 		log.Println("Waiting for 'all done' message from server...")
 		rx := <-tcp.RecvQueue
 		log.Println("RX buffer is ready...")
-		data, err := extractPayload(rx)
+		data, err := tcp.ExtractPayload(rx)
 		if err != nil {
 			t.Fatalf("unable to extract payload: %s", err)
 		}
