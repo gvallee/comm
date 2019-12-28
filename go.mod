@@ -1,6 +1,6 @@
 module github.com/gvallee/comm
 
-go 1.12
+go 1.13
 
 require (
 	github.com/gvallee/event v1.0.0
