@@ -76,6 +76,11 @@ type TCPTransportCfg struct {
 	// Accept specifies whether the TCP transport accepts incoming connections
 	Accept bool
 
+	// DoNotBlockOnAccept specifies if the accept call should be performed
+	// in a separate routine or not, i.e., to avoid the caller to block. If
+	// 'Accept' is not set to true, this will be ignored
+	DoNotBlockOnAccept bool
+
 	// MaxRetry is the maximum of retries when trying to connect
 	MaxRetry int
 
@@ -215,6 +220,10 @@ func getPayload(conn net.Conn, rx []byte) error {
 	return getPayloadWithSize(conn, payloadSize, rx)
 }
 
+// SendMsg sends a message, i.e., a header and payload using a specific
+// transport. Remember that the header and payload will be copied to a
+// TX buffer and queued to a send queue for a separate thread to perform
+// the actual send.
 func (tpt *TCPTransport) SendMsg(hdr TCPHeader, payload []byte) error {
 	tx := tpt.TxPool.Get()
 	if tx == nil {
@@ -285,6 +294,9 @@ func handleTermMsg() bool {
 	return true
 }
 
+// ExtractPayload returns the payload from a RX buffer. The caller is in charge
+// of copying the data as required since the data returned by this function is
+// not guaranteed once the RX buffer is returned.
 func (t *TCPTransport) ExtractPayload(rx []byte) ([]byte, error) {
 	sizeOfSize := int(rx[sizeOfSizeOffset])
 	payloadSize, n := binary.Uvarint(rx[payloadSizeOffset : payloadSizeOffset+sizeOfSize])
@@ -294,6 +306,9 @@ func (t *TCPTransport) ExtractPayload(rx []byte) ([]byte, error) {
 	return rx[payloadOffset : payloadOffset+payloadSize], nil
 }
 
+// ExtractDest returns the message destination endpoint ID from a RX buffer.
+// The caller is in charge of copying the data as required since the data
+// returned by this function is not guaranteed once the RX buffer is returned.
 func (t *TCPTransport) ExtractDest(rx []byte) string {
 	return string(rx[dstOffset : dstOffset+dstLen])
 }
@@ -316,7 +331,8 @@ func handleConnRedirect(tcp *TCPTransport, rx []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to extract port from payload: %w", err)
 	}
-	_, err = tcp.ConnectToPort(src, uint16(port))
+	ip := "notvalid"
+	_, err = tcp.ConnectToPort(src, ip, uint16(port))
 	if err != nil {
 		return fmt.Errorf("connect failed: %w", err)
 	}
@@ -413,7 +429,7 @@ func sendThread(tcp *TCPTransport) {
 			log.Printf("(%s) New TX to send...", addr.String())
 			n, err := tcp.Conn.Write(tx)
 			if n == 0 {
-				// Connection is closed, terminating
+				// Connection is closed, exiting
 				log.Println("[INFO:sendThread] Connection closed, terminating")
 				return
 			}
@@ -428,6 +444,15 @@ func sendThread(tcp *TCPTransport) {
 			}
 		}
 	}
+}
+
+func doAccept(serverID string, tcp *TCPTransport) error {
+	err := tcp.Accept(serverID)
+	if err != nil {
+		log.Printf("[ERROR:tcp] unable to accept incoming connections: %s", err)
+		return nil
+	}
+	return nil
 }
 
 // Init creates a new TCP transport based on a configuration
@@ -465,10 +490,14 @@ func (cfg *TCPTransportCfg) Init() *TCPTransport {
 	if cfg.Accept {
 		serverID := util.GenerateID()
 		tcp.receiverEPs = append(tcp.receiverEPs, serverID)
-		err := tcp.Accept(serverID)
-		if err != nil {
-			log.Printf("[ERROR:tcp] unable to accept incoming connections: %s", err)
-			return nil
+		log.Println("[INFO:tcp] Waiting for connection...")
+		if !cfg.DoNotBlockOnAccept {
+			err := doAccept(serverID, &tcp)
+			if err != nil {
+				return nil
+			}
+		} else {
+			go doAccept(serverID, &tcp)
 		}
 	}
 
@@ -510,10 +539,19 @@ func (tpt *TCPTransport) Accept(epID string) error {
 	tpt.Status = tcpTransportStatusAccepting
 	tpt.receiverEPs = append(tpt.receiverEPs, epID)
 
-	listener, err := net.Listen("tcp", tpt.Cfg.Interface+":"+strconv.Itoa(int(tpt.Cfg.PortLow)))
+	port := tpt.Cfg.PortLow
+Retry:
+	listener, err := net.Listen("tcp", tpt.Cfg.Interface+":"+strconv.Itoa(int(port)))
 	if err != nil {
+		// If the accept failed, we try the next available port in the range
+		// defined in the configuration. If out of ports, we fail
+		if port < tpt.Cfg.PortHigh {
+			port++
+			goto Retry
+		}
 		return fmt.Errorf("listen failed while acception new TCP connection: %w", err)
 	}
+	log.Printf("[INFO:tcp] Listening on port %d\n", port)
 
 	for {
 		tpt.Conn, err = listener.Accept()
@@ -597,20 +635,38 @@ func (tpt *TCPTransport) initHandshake(epID string) (string, error) {
 	return string(serverID), nil
 }
 
-func (tpt *TCPTransport) Connect(epID string) (string, error) {
+// Connect performs a connect to an IP and include the endpoint ID of the caller
+// in the connection handshake so that the remote endpoint knows the node and
+// the endpoint from which the connection was initiated.
+func (tpt *TCPTransport) Connect(epID string, ip string) (string, error) {
 	if tpt == nil || tpt.Cfg == nil {
 		log.Println("[ERROR:tcp] corrupted transport object")
 		return "", nil
 	}
-	log.Printf("Connecting to %s:%d\n", tpt.Cfg.Interface, tpt.Cfg.PortLow)
-	return tpt.ConnectToPort(epID, tpt.Cfg.PortLow)
+
+	portMax := tpt.Cfg.PortHigh
+	if portMax == 0 {
+		portMax = tpt.Cfg.PortLow
+	}
+	log.Printf("Connecting to %s %d-%d\n", ip, tpt.Cfg.PortLow, portMax)
+
+	for port := tpt.Cfg.PortLow; port <= portMax; port++ {
+		log.Printf("Trying to connect on port %d\n", port)
+		id, err := tpt.ConnectToPort(epID, ip, port)
+		if err == nil {
+			log.Printf("Connection to endpoint succeeded on port: %d\n", port)
+			return id, err
+		} else {
+			log.Printf("Connection on port failed: %s; checking for potential other ports to use.\n", err)
+		}
+	}
+	return "", fmt.Errorf("unable to connect to remote endpoint")
 }
 
 // Connect creates a connection using a given transport
-func (tpt *TCPTransport) ConnectToPort(epID string, port uint16) (string, error) {
+func (tpt *TCPTransport) ConnectToPort(epID string, ip string, port uint16) (string, error) {
 	var err error
 	retry := 0
-	ip := tpt.Cfg.Interface
 Retry:
 	tpt.Conn, err = net.Dial("tcp", ip+":"+strconv.Itoa(int(port)))
 	if err != nil {
@@ -660,10 +716,13 @@ func (tpt *TCPTransport) GetPayloadFromRX(rx []byte) []byte {
 	return rx[msgTypeOffset : msgTypeOffset+payloadSize]
 }
 
+// Fini cleanly finalizes a TCP transport
 func (tpt *TCPTransport) Fini() {
 	// todo: implementation here
 }
 
+// SendTermMsg is a helper function that sends a termination message,
+// which is specific to the TCP transport.
 func (tpt *TCPTransport) SendTermMsg(src string, dst string) error {
 	hdr := TCPHeader{
 		MsgType: TERMMSG,

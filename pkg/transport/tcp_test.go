@@ -17,7 +17,7 @@ func doServer(t *testing.T) {
 	cfg := TCPTransportCfg{
 		Interface: "127.0.0.1",
 		PortLow:   44444,
-		PortHigh:  44445,
+		PortHigh:  44444,
 		Accept:    true,
 	}
 	tcp := cfg.Init()
@@ -66,7 +66,8 @@ func doServer(t *testing.T) {
 }
 
 func doClient(t *testing.T) {
-	log.Println("Hello, i am the test client")
+	id := clientID
+	log.Printf("(%s) Hello, i am a test client\n", id)
 	cfg := TCPTransportCfg{
 		Interface: "127.0.0.1",
 		PortLow:   44444,
@@ -77,14 +78,14 @@ func doClient(t *testing.T) {
 		t.Fatalf("unable to instantiate TCP transport")
 	}
 
-	log.Println("Connecting to server...")
-	serverID, err := tcp.Connect(clientID)
+	log.Printf("(%s) Connecting to server...", id)
+	serverID, err := tcp.Connect(clientID, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("connect failed: %s", err)
 	}
 
-	log.Printf("Connection to %s successded.\n", serverID)
-	log.Println("Start sending test messages...")
+	log.Printf("(%s) Connection to %s successded.\n", id, serverID)
+	log.Printf("(%s) Start sending test messages...", id)
 
 	hdr := TCPHeader{
 		MsgType: DATAMSG,
@@ -99,9 +100,8 @@ func doClient(t *testing.T) {
 	}
 
 	for {
-		log.Println("Waiting for 'all done' message from server...")
+		log.Printf("(%s) Waiting for 'all done' message from server...", id)
 		rx := <-tcp.RecvQueue
-		log.Println("RX buffer is ready...")
 		data, err := tcp.ExtractPayload(rx)
 		if err != nil {
 			t.Fatalf("unable to extract payload: %s", err)
@@ -110,7 +110,7 @@ func doClient(t *testing.T) {
 			log.Println("Successfully receive the 'all done' message from server")
 			break
 		} else {
-			t.Fatalf("Received %s instead of the 'all done' message", string(data))
+			t.Fatalf("(%s) Received %s instead of the 'all done' message", id, string(data))
 		}
 	}
 
