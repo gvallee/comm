@@ -8,7 +8,7 @@ the Go ecosystem is not as mature as the C ecosystem (nothing wrong with it,
 it is just a fact) and lacks basic building blocks for system software
 development.
 
-I personally am a big fan on projects such as CCI (https://github.com/CCI/cci)
+I personally am a big fan of projects such as CCI (https://github.com/CCI/cci)
 and OpenUCX (https://github.com/openucx/ucx), which I use all the time when
 working on a C project. Unfortunately, there are no similar packages for Go.
 And yes, it is possible to interface Go and C to rely on these projects, but
