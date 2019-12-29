@@ -101,6 +101,7 @@ type TCPTransport struct {
 
 	receiverEPs []string
 	remoteEPs   []string
+	port        uint16
 
 	// RX pool
 	RxPool pool.Pool
@@ -490,7 +491,7 @@ func (cfg *TCPTransportCfg) Init() *TCPTransport {
 	if cfg.Accept {
 		serverID := util.GenerateID()
 		tcp.receiverEPs = append(tcp.receiverEPs, serverID)
-		log.Println("[INFO:tcp] Waiting for connection...")
+		log.Printf("[INFO:tcp] Waiting for connection on %s...", tcp.Cfg.Interface)
 		if !cfg.DoNotBlockOnAccept {
 			err := doAccept(serverID, &tcp)
 			if err != nil {
@@ -551,7 +552,8 @@ Retry:
 		}
 		return fmt.Errorf("listen failed while acception new TCP connection: %w", err)
 	}
-	log.Printf("[INFO:tcp] Listening on port %d\n", port)
+	tpt.port = port
+	log.Printf("[INFO:tcp] Listening on port %d\n", tpt.port)
 
 	for {
 		tpt.Conn, err = listener.Accept()
@@ -635,15 +637,18 @@ func (tpt *TCPTransport) initHandshake(epID string) (string, error) {
 	return string(serverID), nil
 }
 
-// Connect performs a connect to an IP and include the endpoint ID of the caller
-// in the connection handshake so that the remote endpoint knows the node and
-// the endpoint from which the connection was initiated.
-func (tpt *TCPTransport) Connect(epID string, ip string) (string, error) {
+// Connect performs a connect using a given transport and include the endpoint
+// ID of the caller  in the connection handshake so that the remote endpoint
+// knows the node and the endpoint from which the connection was initiated.
+// Remember that the transport is assumed to have been previously initialized
+// for a specific target (e.g., destination IP).
+func (tpt *TCPTransport) Connect(epID string) (string, error) {
 	if tpt == nil || tpt.Cfg == nil {
 		log.Println("[ERROR:tcp] corrupted transport object")
 		return "", nil
 	}
 
+	ip := tpt.Cfg.Interface
 	portMax := tpt.Cfg.PortHigh
 	if portMax == 0 {
 		portMax = tpt.Cfg.PortLow
@@ -651,13 +656,16 @@ func (tpt *TCPTransport) Connect(epID string, ip string) (string, error) {
 	log.Printf("Connecting to %s %d-%d\n", ip, tpt.Cfg.PortLow, portMax)
 
 	for port := tpt.Cfg.PortLow; port <= portMax; port++ {
-		log.Printf("Trying to connect on port %d\n", port)
-		id, err := tpt.ConnectToPort(epID, ip, port)
-		if err == nil {
-			log.Printf("Connection to endpoint succeeded on port: %d\n", port)
-			return id, err
-		} else {
-			log.Printf("Connection on port failed: %s; checking for potential other ports to use.\n", err)
+		// Make sure we do not connect to ourselves
+		if port != tpt.port {
+			log.Printf("Trying to connect on port %d\n", port)
+			id, err := tpt.ConnectToPort(epID, ip, port)
+			if err == nil {
+				log.Printf("Connection to endpoint succeeded on port: %d\n", port)
+				return id, err
+			} else {
+				log.Printf("Connection on port failed: %s; checking for potential other ports to use.\n", err)
+			}
 		}
 	}
 	return "", fmt.Errorf("unable to connect to remote endpoint")

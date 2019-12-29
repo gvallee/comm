@@ -255,7 +255,7 @@ func (t *Transport) Recv() []byte {
 
 // Connect to a specific remote node identified by an identifier.
 // For example, the id can be a TCP address.
-func (tpt *Transport) Connect(id string) *Endpoint {
+func (tpt *Transport) Connect() *Endpoint {
 	if tpt == nil || tpt.commEngine == nil {
 		log.Println("[ERROR:transport] corrupted transport")
 		return nil
@@ -269,7 +269,7 @@ func (tpt *Transport) Connect(id string) *Endpoint {
 
 		// Add the transport to the endpoint
 		ep.transports = append(ep.transports, *tpt)
-		serverID, err := tpt.TCP.Connect(ep.ID, id)
+		serverID, err := tpt.TCP.Connect(ep.ID)
 		tpt.eps[serverID] = ep
 		if err != nil {
 			log.Printf("[ERROR:transport] unable to connect to remote peer: %s", err)

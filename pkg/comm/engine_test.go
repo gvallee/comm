@@ -97,7 +97,7 @@ func TestBasicSendRecv(t *testing.T) {
 	}
 
 	// Use that endpoint to connect to server
-	targetEP := tpt.Connect(tcpServerURL)
+	targetEP := tpt.Connect()
 	if targetEP == nil {
 		t.Fatalf("unable to connect to endpoint")
 	}
