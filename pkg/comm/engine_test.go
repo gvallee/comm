@@ -19,6 +19,20 @@ const (
 	msgStr       = "Hello World"
 )
 
+func magicRecvRoutine(t *testing.T) {
+	// Create an 'auto' engine, which means the engine will setup everything required
+	// to accept connections and perform communications without having the user specifying
+	// much details about the system. In this mode, the engine enters in discovery mode,
+	// setup all required mechanism to any type of communications
+	engineCfg := EngineCfg{
+		Mode: Auto,
+	}
+	commEngine := engineCfg.Init()
+	if commEngine == nil {
+		t.Fatal("unable to start engine")
+	}
+}
+
 func recvRoutine(t *testing.T) {
 
 	// Create a minimalist engine, we do not want much by default since we will
@@ -54,18 +68,6 @@ func recvRoutine(t *testing.T) {
 	if string(msg) != msgStr {
 		t.Fatalf("Received %s instead of %s", string(msg), msgStr)
 	}
-	/*
-		// Receive loop
-		for {
-			evt := ep.GetRXEvent()
-			if IsTermEvent(evt) {
-				return
-			}
-
-			data := evt.data
-			t.Log("Recv'd data: %s\n", string(data))
-		}
-	*/
 
 	tpt.Fini()
 }
@@ -95,7 +97,7 @@ func TestBasicSendRecv(t *testing.T) {
 	}
 
 	// Use that endpoint to connect to server
-	targetEP := tpt.Connect()
+	targetEP := tpt.Connect(tcpServerURL)
 	if targetEP == nil {
 		t.Fatalf("unable to connect to endpoint")
 	}
@@ -113,4 +115,22 @@ func TestBasicSendRecv(t *testing.T) {
 	// This will emit a termination event and make sure everything is going to
 	// be cleanly finalized
 	tpt.Fini()
+}
+
+func TestMagicComm(t *testing.T) {
+	go magicRecvRoutine(t)
+
+	engineCfg := EngineCfg{
+		Mode: Auto,
+	}
+	commEngine := engineCfg.Init()
+	if commEngine == nil {
+		t.Fatal("unable to create communication engine")
+	}
+
+	log.Println("Connection to endpoint on 127.0.0.1")
+	ep := commEngine.Connect("127.0.0.1")
+	if ep == nil {
+		t.Fatal("unable to connect to remote endpoint")
+	}
 }

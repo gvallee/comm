@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/gvallee/comm/internal/pkg/util"
 	"github.com/gvallee/comm/pkg/transport"
 	"github.com/gvallee/event/pkg/event"
 )
@@ -45,28 +46,60 @@ const (
 	// SingleConnectionMode specifies that a single connection must be used
 	// between any two given endpoints
 	SingleConnectionMode = "single"
+
+	/* Some default values with use in the context of TCP */
+	defaultTCPPortLow  = 50000
+	defaultTCPPortHigh = 50100
 )
 
 // Cfg represents the configuration of a transport
 type TransportCfg struct {
-	ID             string
-	TransportMode  string
+	// ID identifies the transport
+	ID string
+
+	// TransportMode specifies the transport's mode, i.e., 'auto' or
+	// 'explicit'.
+	// This impacts how much details the calling application is providing and
+	// assumption about configuration. For example, in 'auto' mode, the
+	// transport falls back in discovery mode and is able to accept of broad
+	// range of connections
+	TransportMode string
+
+	// ConnectionMode specifies how a transport can be used by a
+	// communication engine.
+	// For example, in 'multiplex' mode, a single connection can be used to
+	// transfer message from/to different endpoints; in 'single' mode, a
+	// connection can be used only for communications between a single pair
+	// of endpoints; while the 'parallel' mode allows for multiple connections
+	// between a pair of endpoints.
 	ConnectionMode string
 }
 
 // Transport is the structure representing a given network transport
 type Transport struct {
-	cfg TransportCfg
-
-	commEngine  *Engine
-	EventEngine *event.Engine
-
-	// todo: move to engine
-	EventTypes map[string]*event.EventType
-	Priv       interface{}
-	ConcreteID string
+	cfg        TransportCfg
+	iface      util.NetIface
+	commEngine *Engine
 	eps        map[string]*Endpoint
 
+	// EventEngine is the event engine associated to the transport
+	EventEngine *event.Engine
+
+	// EventTypes are a dictionary of event types based on a human
+	// readable identifier
+	EventTypes map[string]*event.EventType
+
+	// Priv is the underlying concrete transport (to be deprecated,
+	// use ConcreteID instead)
+	Priv interface{}
+
+	// ConcreteID identifies the type of the underlying concrete
+	// transport (e.g., 'TCP')
+	ConcreteID string
+
+	// InitialNumEvents specifies how many inactive events are
+	// available in the transport's event system.
+	// todo: move to TransportCfg
 	InitialNumEvents uint64
 
 	// Pointers to the different transport we support, used to get transport specific data
@@ -184,6 +217,9 @@ func (t *Transport) Send(epID string, msg []byte) error {
 	return nil
 }
 
+// LookupReceiver looks into the list of all endpoints that are
+// reachable using this transport, based on the endpoint identifier,
+// and returns the associated endpoint structure.
 func (t *Transport) LookupReceiver(target string) *Endpoint {
 	return t.eps[target]
 }
@@ -217,7 +253,9 @@ func (t *Transport) Recv() []byte {
 	return nil
 }
 
-func (tpt *Transport) Connect() *Endpoint {
+// Connect to a specific remote node identified by an identifier.
+// For example, the id can be a TCP address.
+func (tpt *Transport) Connect(id string) *Endpoint {
 	if tpt == nil || tpt.commEngine == nil {
 		log.Println("[ERROR:transport] corrupted transport")
 		return nil
@@ -231,7 +269,7 @@ func (tpt *Transport) Connect() *Endpoint {
 
 		// Add the transport to the endpoint
 		ep.transports = append(ep.transports, *tpt)
-		serverID, err := tpt.TCP.Connect(ep.ID)
+		serverID, err := tpt.TCP.Connect(ep.ID, id)
 		tpt.eps[serverID] = ep
 		if err != nil {
 			log.Printf("[ERROR:transport] unable to connect to remote peer: %s", err)
@@ -243,4 +281,41 @@ func (tpt *Transport) Connect() *Endpoint {
 	}
 
 	return ep
+}
+
+func (e *Engine) createAutoTCPTransport(iface util.NetIface, ip string) *Transport {
+	log.Printf("Instantiating TCP transport for %s\n", ip)
+
+	// The transport will automatically start listening on the default lower port
+	tcpCfg := transport.TCPTransportCfg{
+		PortLow:            defaultTCPPortLow,
+		PortHigh:           defaultTCPPortHigh,
+		Accept:             true,
+		DoNotBlockOnAccept: true,
+	}
+	tcp := tcpCfg.Init()
+	if tcp == nil {
+		log.Println("[ERROR:transport] unable to instantiate TCP transport")
+		return nil
+	}
+
+	newTransport := e.AddTransport(tcp)
+	if newTransport == nil {
+		log.Println("[ERROR:transport] unable to create new transport")
+	}
+	newTransport.iface.Name = iface.Name
+	newTransport.iface.Addr = iface.Addr
+
+	return newTransport
+}
+
+func (e *Engine) getTransportFromIface(iface util.NetIface) *Transport {
+	// Loop over the list of transports we know and find the one matching the target interface
+	for _, tpt := range e.transports {
+		if iface.Addr == tpt.iface.Addr && iface.Name == tpt.iface.Name {
+			return tpt
+		}
+	}
+
+	return nil
 }
