@@ -1,11 +1,11 @@
 # comm
-Go package for scalable and high-performance communications
+A Go package for scalable and high-performance communications
 
 ## Overview
 
 Go is a powerful programming language with a lot of potential. Unfortunately,
 the Go ecosystem is not as mature as the C ecosystem (nothing wrong with it,
-it is just a fact) and lack basic building blocks for system software
+it is just a fact) and lacks basic building blocks for system software
 development.
 
 I personally am a big fan on projects such as CCI (https://github.com/CCI/cci)
@@ -29,11 +29,18 @@ implicit configurations (e.g., when coding, I *do not want* to assume
 where the endpoints will be, they can be on the same node, find the
 way to connect them).
 - Do not assume any underlying protocol but instead find the best one
-to connect a pair of endpoint. If an Infiniband network is available,
+to connect a pair of endpoint (except when explicit told to use a
+specific network). If an Infiniband network is available,
 the appropriate protocol should be used; if the two endpoints are on
 the same node, a shared memory transport should be used. In theory,
 we can support any protocol, including TCP, UDP, IB, shared memory,
 http, IP, Ethernet.
+- Support a wide-range of applications: I am personally interested
+in distributed system software, including distributed file systems,
+blockchains, distributed consensus algorithms, new parallel and
+distributed programming languages. All these domains require to
+exchange data and potentially huge amount of data (distributed
+file systems).
 
 ## Core concepts
 
