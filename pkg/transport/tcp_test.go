@@ -14,6 +14,8 @@ const (
 
 func doServer(t *testing.T) {
 	log.Println("Hello, i am the server test")
+
+	// Server's info
 	cfg := TCPTransportCfg{
 		Interface: "127.0.0.1",
 		PortLow:   44444,
@@ -68,6 +70,8 @@ func doServer(t *testing.T) {
 func doClient(t *testing.T) {
 	id := clientID
 	log.Printf("(%s) Hello, i am a test client\n", id)
+
+	// Data about the peer we want to connect to
 	cfg := TCPTransportCfg{
 		Interface: "127.0.0.1",
 		PortLow:   44444,
@@ -79,7 +83,7 @@ func doClient(t *testing.T) {
 	}
 
 	log.Printf("(%s) Connecting to server...", id)
-	serverID, err := tcp.Connect(clientID, "127.0.0.1")
+	serverID, err := tcp.Connect(clientID)
 	if err != nil {
 		t.Fatalf("connect failed: %s", err)
 	}

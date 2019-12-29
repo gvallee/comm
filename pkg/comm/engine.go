@@ -130,7 +130,7 @@ func (e *Engine) createEndpointForIface(iface util.NetIface, ip string) *Endpoin
 	}
 
 	// Use that endpoint to connect to server
-	targetEP := tpt.Connect(ip)
+	targetEP := tpt.Connect()
 	if targetEP == nil {
 		log.Println("[ERROR:engine] Unable to connect to endpoint")
 		return nil
