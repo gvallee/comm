@@ -6,13 +6,13 @@ import (
 )
 
 const (
-	clientID   = "I am the client"
-	msg1       = "message 1"
-	msg2       = "message 2"
-	allDoneMsg = "All done."
+	tcpClientID   = "I am the client"
+	tcpMsg1       = "message 1"
+	tcpMsg2       = "message 2"
+	tcpAllDoneMsg = "All done."
 )
 
-func doServer(t *testing.T) {
+func doTCPServer(t *testing.T) {
 	log.Println("Hello, i am the server test")
 	cfg := TCPTransportCfg{
 		Interface: "127.0.0.1",
@@ -32,8 +32,8 @@ func doServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to extract payload: %s", err)
 	}
-	if string(data) != msg1 {
-		t.Fatalf("receiver %s instead of %s", string(data), msg1)
+	if string(data) != tcpMsg1 {
+		t.Fatalf("receiver %s instead of %s", string(data), tcpMsg1)
 	}
 	log.Printf("Successfully received: %s\n", string(data))
 	err = tcp.RxPool.Return(rx)
@@ -46,8 +46,8 @@ func doServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to extract payload: %s", err)
 	}
-	if string(data) != msg2 {
-		t.Fatalf("receiver %s instead of %s", string(data), msg2)
+	if string(data) != tcpMsg2 {
+		t.Fatalf("receiver %s instead of %s", string(data), tcpMsg2)
 	}
 	log.Printf("Successfully received: %s\n", string(data))
 	err = tcp.RxPool.Return(rx)
@@ -57,16 +57,16 @@ func doServer(t *testing.T) {
 
 	hdr := TCPHeader{
 		MsgType: DATAMSG,
-		Dst:     clientID,
+		Dst:     tcpClientID,
 	}
-	err = tcp.SendMsg(hdr, []byte(allDoneMsg))
+	err = tcp.SendMsg(hdr, []byte(tcpAllDoneMsg))
 	if err != nil {
 		t.Fatal("unable to send message")
 	}
 }
 
-func doClient(t *testing.T) {
-	id := clientID
+func doTCPClient(t *testing.T) {
+	id := tcpClientID
 	log.Printf("(%s) Hello, i am a test client\n", id)
 	cfg := TCPTransportCfg{
 		Interface: "127.0.0.1",
@@ -79,7 +79,7 @@ func doClient(t *testing.T) {
 	}
 
 	log.Printf("(%s) Connecting to server...", id)
-	serverID, err := tcp.Connect(clientID, "127.0.0.1")
+	serverID, err := tcp.Connect(tcpClientID, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("connect failed: %s", err)
 	}
@@ -90,11 +90,11 @@ func doClient(t *testing.T) {
 	hdr := TCPHeader{
 		MsgType: DATAMSG,
 	}
-	err = tcp.SendMsg(hdr, []byte(msg1))
+	err = tcp.SendMsg(hdr, []byte(tcpMsg1))
 	if err != nil {
 		t.Fatalf("unable to send first message: %s", err)
 	}
-	err = tcp.SendMsg(hdr, []byte(msg2))
+	err = tcp.SendMsg(hdr, []byte(tcpMsg2))
 	if err != nil {
 		t.Fatalf("unable to send second message: %s", err)
 	}
@@ -106,7 +106,7 @@ func doClient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unable to extract payload: %s", err)
 		}
-		if string(data) == allDoneMsg {
+		if string(data) == tcpAllDoneMsg {
 			log.Println("Successfully receive the 'all done' message from server")
 			break
 		} else {
@@ -114,7 +114,7 @@ func doClient(t *testing.T) {
 		}
 	}
 
-	err = tcp.SendTermMsg(clientID, serverID)
+	err = tcp.SendTermMsg(tcpClientID, serverID)
 	if err != nil {
 		t.Fatalf("unable to send termination message: %s", err)
 	}
@@ -123,7 +123,7 @@ func doClient(t *testing.T) {
 }
 
 func TestTCP(t *testing.T) {
-	go doServer(t)
+	go doTCPServer(t)
 
-	doClient(t)
+	doTCPClient(t)
 }
